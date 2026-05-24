@@ -22,6 +22,27 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 API_SECRET = os.getenv("API_SECRET", "change-me")
 
 
+def _send_email(smtp_host, smtp_port, smtp_user, smtp_pass, from_email, to_email, msg):
+    """Envía un email forzando IPv4 para evitar problemas en Railway."""
+    import socket
+    # Resolver hostname a IPv4 para evitar [Errno 101] Network unreachable con IPv6
+    ipv4_addr = socket.getaddrinfo(smtp_host, smtp_port, socket.AF_INET)[0][4][0]
+
+    if smtp_port == 465:
+        import ssl
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL(ipv4_addr, smtp_port, context=context, timeout=15) as server:
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, to_email, msg.as_string())
+    else:
+        with smtplib.SMTP(ipv4_addr, smtp_port, timeout=15) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, to_email, msg.as_string())
+
+
 @app.route("/")
 def health():
     return jsonify({
@@ -142,17 +163,7 @@ def send_calendar_invite():
         msg["To"] = kam_email
         msg.attach(MIMEText(html_body, "html"))
 
-        if smtp_port == 465:
-            import ssl
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=15) as server:
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(from_email, kam_email, msg.as_string())
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(from_email, kam_email, msg.as_string())
+        _send_email(smtp_host, smtp_port, smtp_user, smtp_pass, from_email, kam_email, msg)
 
         logger.info(f"Calendar invite sent to {kam_email} for {channel_name} on {planned_date}")
         return jsonify({"status": "sent", "to": kam_email})
@@ -256,17 +267,7 @@ def test_smtp():
             "html"
         ))
 
-        if smtp_port == 465:
-            import ssl
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=15) as server:
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(from_email, to_email, msg.as_string())
-        else:
-            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.sendmail(from_email, to_email, msg.as_string())
+        _send_email(smtp_host, smtp_port, smtp_user, smtp_pass, from_email, to_email, msg)
 
         return jsonify({
             "status": "sent",
