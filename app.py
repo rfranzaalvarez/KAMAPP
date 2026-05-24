@@ -88,7 +88,6 @@ def send_calendar_invite():
     if not kam_email:
         return jsonify({"error": "kam_email required"}), 400
 
-    # Formatear fecha en español
     try:
         from datetime import datetime
         dt = datetime.strptime(planned_date, "%Y-%m-%d")
@@ -111,19 +110,11 @@ def send_calendar_invite():
       </div>
       <div style="background: #f7f8fa; padding: 24px; border: 1px solid #dde1e8; border-top: none; border-radius: 0 0 12px 12px;">
         <p style="color: #1a1a2e; font-size: 14px; margin: 0 0 16px;">Hola <strong>{kam_name}</strong>,</p>
-        <p style="color: #5a6078; font-size: 13px; margin: 0 0 20px;">
-          Tienes una visita planificada:
-        </p>
+        <p style="color: #5a6078; font-size: 13px; margin: 0 0 20px;">Tienes una visita planificada:</p>
         <div style="background: white; border: 1px solid #dde1e8; border-left: 4px solid #E87A1E; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-          <div style="font-size: 16px; font-weight: bold; color: #1a1a2e; margin-bottom: 8px;">
-            {channel_name}
-          </div>
-          <div style="font-size: 13px; color: #5a6078; margin-bottom: 4px;">
-            📅 <strong>{fecha_str}</strong>
-          </div>
-          <div style="font-size: 13px; color: #5a6078; margin-bottom: 4px;">
-            🕐 <strong>{hora_str}h</strong>
-          </div>
+          <div style="font-size: 16px; font-weight: bold; color: #1a1a2e; margin-bottom: 8px;">{channel_name}</div>
+          <div style="font-size: 13px; color: #5a6078; margin-bottom: 4px;">📅 <strong>{fecha_str}</strong></div>
+          <div style="font-size: 13px; color: #5a6078; margin-bottom: 4px;">🕐 <strong>{hora_str}h</strong></div>
           {"<div style='font-size: 13px; color: #5a6078; margin-bottom: 4px;'>📍 " + channel_address + "</div>" if channel_address else ""}
           {"<div style='font-size: 12px; color: #8b90a0; margin-top: 8px; padding-top: 8px; border-top: 1px solid #eef0f4;'>📝 " + notes + "</div>" if notes else ""}
         </div>
@@ -151,10 +142,17 @@ def send_calendar_invite():
         msg["To"] = kam_email
         msg.attach(MIMEText(html_body, "html"))
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, kam_email, msg.as_string())
+        if smtp_port == 465:
+            import ssl
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=15) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, kam_email, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, kam_email, msg.as_string())
 
         logger.info(f"Calendar invite sent to {kam_email} for {channel_name} on {planned_date}")
         return jsonify({"status": "sent", "to": kam_email})
@@ -229,7 +227,7 @@ def run_weekly_reports():
 # ============ TEST ENDPOINTS ============
 @app.route("/api/test/smtp")
 def test_smtp():
-    """GET para probar que el SMTP funciona. Envía un email de prueba."""
+    """GET - Prueba que el SMTP funciona enviando un email de test."""
     to_email = request.args.get("to")
     if not to_email:
         return jsonify({"error": "Añade ?to=tu@email.com"}), 400
@@ -242,28 +240,55 @@ def test_smtp():
         from_email = os.environ.get("SMTP_FROM_EMAIL", smtp_user)
 
         if not smtp_user or not smtp_pass:
-            return jsonify({"error": "SMTP_USER o SMTP_PASS no configurados", "smtp_user": smtp_user[:3] + "***" if smtp_user else "VACÍO"}), 500
+            return jsonify({
+                "error": "SMTP_USER o SMTP_PASS no configurados",
+                "smtp_user": (smtp_user[:3] + "***") if smtp_user else "VACÍO",
+                "smtp_pass": "SET" if smtp_pass else "VACÍO",
+            }), 500
 
         msg = MIMEMultipart("alternative")
         msg["Subject"] = "Test SMTP - CRM para KAMs"
         msg["From"] = f"CRM para KAMs <{from_email}>"
         msg["To"] = to_email
-        msg.attach(MIMEText("<h2>SMTP funciona correctamente</h2><p>Este es un email de prueba del CRM para KAMs.</p>", "html"))
+        msg.attach(MIMEText(
+            "<h2>SMTP funciona correctamente</h2>"
+            "<p>Este es un email de prueba del CRM para KAMs.</p>",
+            "html"
+        ))
 
-        with smtplib.SMTP(smtp_host, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.sendmail(from_email, to_email, msg.as_string())
+        if smtp_port == 465:
+            import ssl
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(smtp_host, smtp_port, context=context, timeout=15) as server:
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, to_email, msg.as_string())
+        else:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(from_email, to_email, msg.as_string())
 
-        return jsonify({"status": "sent", "to": to_email, "from": from_email, "smtp_host": smtp_host})
+        return jsonify({
+            "status": "sent",
+            "to": to_email,
+            "from": from_email,
+            "smtp_host": smtp_host,
+            "smtp_port": smtp_port,
+        })
 
     except Exception as e:
-        return jsonify({"error": str(e), "smtp_host": os.environ.get("SMTP_HOST", ""), "smtp_user": os.environ.get("SMTP_USER", "")[:5] + "***"}), 500
+        return jsonify({
+            "error": str(e),
+            "smtp_host": os.environ.get("SMTP_HOST", "NO SET"),
+            "smtp_port": os.environ.get("SMTP_PORT", "NO SET"),
+            "smtp_user": (os.environ.get("SMTP_USER", "")[:5] + "***") if os.environ.get("SMTP_USER") else "NO SET",
+            "smtp_pass": "SET" if os.environ.get("SMTP_PASS") else "NO SET",
+        }), 500
 
 
 @app.route("/api/test/report")
 def test_weekly_report():
-    """GET para disparar el reporte semanal manualmente."""
+    """GET - Dispara el reporte semanal manualmente."""
     if not db.is_configured():
         return jsonify({"error": "Supabase no configurado"}), 500
     key = request.args.get("api_key")
