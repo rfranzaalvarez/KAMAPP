@@ -226,6 +226,57 @@ def run_weekly_reports():
     return results
 
 
+# ============ TEST ENDPOINTS ============
+@app.route("/api/test/smtp")
+def test_smtp():
+    """GET para probar que el SMTP funciona. Envía un email de prueba."""
+    to_email = request.args.get("to")
+    if not to_email:
+        return jsonify({"error": "Añade ?to=tu@email.com"}), 400
+
+    try:
+        smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_user = os.environ.get("SMTP_USER", "")
+        smtp_pass = os.environ.get("SMTP_PASS", "")
+        from_email = os.environ.get("SMTP_FROM_EMAIL", smtp_user)
+
+        if not smtp_user or not smtp_pass:
+            return jsonify({"error": "SMTP_USER o SMTP_PASS no configurados", "smtp_user": smtp_user[:3] + "***" if smtp_user else "VACÍO"}), 500
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "Test SMTP - CRM para KAMs"
+        msg["From"] = f"CRM para KAMs <{from_email}>"
+        msg["To"] = to_email
+        msg.attach(MIMEText("<h2>SMTP funciona correctamente</h2><p>Este es un email de prueba del CRM para KAMs.</p>", "html"))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, to_email, msg.as_string())
+
+        return jsonify({"status": "sent", "to": to_email, "from": from_email, "smtp_host": smtp_host})
+
+    except Exception as e:
+        return jsonify({"error": str(e), "smtp_host": os.environ.get("SMTP_HOST", ""), "smtp_user": os.environ.get("SMTP_USER", "")[:5] + "***"}), 500
+
+
+@app.route("/api/test/report")
+def test_weekly_report():
+    """GET para disparar el reporte semanal manualmente."""
+    if not db.is_configured():
+        return jsonify({"error": "Supabase no configurado"}), 500
+    key = request.args.get("api_key")
+    if key != API_SECRET:
+        return jsonify({"error": "Unauthorized - añade ?api_key=TU_API_SECRET"}), 401
+    try:
+        results = run_weekly_reports()
+        return jsonify({"status": "ok", "results": results})
+    except Exception as e:
+        logger.error(f"Error en reporte test: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ============ SCHEDULER ============
 if db.is_configured():
     from apscheduler.schedulers.background import BackgroundScheduler
